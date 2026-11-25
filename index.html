@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desierto Ocular | Visualizador 3D</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: radial-gradient(ellipse at 50% 42%, #202947 0%, #10182f 48%, #070b19 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        
+        .visualizer-container {
+            position: relative;
+            width: min(90vmin, 800px);
+            height: min(90vmin, 800px);
+            max-width: 800px;
+            max-height: 800px;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.58), 0 0 34px rgba(205, 169, 91, 0.10), inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(212, 180, 111, 0.38);
+            background: radial-gradient(ellipse at center, rgba(36, 48, 78, 0.45), rgba(5, 9, 22, 0.2));
+            isolation: isolate;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #e6c783;
+            font-size: 17px;
+            letter-spacing: 0.04em;
+            background: rgba(7, 12, 27, 0.88);
+            padding: 22px 26px;
+            border-radius: 12px;
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            text-align: center;
+            border: 1px solid rgba(212, 180, 111, 0.65);
+        }
+        
+        .controls-info {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 13px;
+            letter-spacing: 0.015em;
+            color: rgba(235, 232, 222, 0.78);
+            z-index: 10;
+            background: rgba(5, 9, 20, 0.58);
+            border: 1px solid rgba(212, 180, 111, 0.16);
+            backdrop-filter: blur(8px);
+            padding: 10px;
+            border-radius: 5px;
+            margin: 0 auto;
+            max-width: 80%;
+            left: 50%;
+            transform: translateX(-50%);
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+        
+        canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+        @media (max-width: 768px) {
+            .visualizer-container {
+                width: 95vmin;
+                height: 95vmin;
+            }
+            
+            .controls-info {
+                font-size: 11px;
+                bottom: 10px;
+                max-width: 90%;
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="visualizer-container">
+        <div class="loading" id="loading" role="status" aria-live="polite">Preparando experiencia...</div>
+        <div class="controls-info" id="controlsInfo">Arrastrá para rotar · Pellizcá o usá la rueda para acercar · Doble clic para reiniciar</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    
+    <script>
+        // URLs de las texturas - ACTUALIZADAS
+        const frontTextureURL = './viewer/texturas/front.jpg'; // Textura frontal
+        const backTextureURL = './viewer/texturas/back.jpg';   // Textura trasera (dorso)
+        const sideTextureURL = './viewer/texturas/side.jpg';   // Nueva textura lateral
+        
+        // Inicializar escena, cámara y renderizador
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0f2b);
+        
+        const container = document.querySelector('.visualizer-container');
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.setClearColor(0x000000, 0);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.physicallyCorrectLights = true;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.4;
+        container.appendChild(renderer.domElement);
+        
+        // Añadir controles de órbita
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 3;
+        controls.maxDistance = 7;
+        controls.enablePan = false;
+        controls.enableZoom = true;
+        controls.rotateSpeed = 0.75;
+        controls.zoomSpeed = 0.8;
+        controls.minPolarAngle = 0.25;
+        controls.maxPolarAngle = Math.PI - 0.25;
+        
+        // Sistema de iluminación mejorado
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const coloredAmbient = new THREE.AmbientLight(0x4477ff, 0.2);
+        scene.add(coloredAmbient);
+        
+        const keyLight = new THREE.DirectionalLight(0xffeedd, 1.5);
+        keyLight.position.set(5, 8, 5);
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.width = 2048;
+        keyLight.shadow.mapSize.height = 2048;
+        keyLight.shadow.camera.near = 0.5;
+        keyLight.shadow.camera.far = 50;
+        keyLight.shadow.camera.left = -10;
+        keyLight.shadow.camera.right = 10;
+        keyLight.shadow.camera.top = 10;
+        keyLight.shadow.camera.bottom = -10;
+        scene.add(keyLight);
+        
+        const fillLight = new THREE.DirectionalLight(0x4477ff, 0.7);
+        fillLight.position.set(0, 3, 5);
+        scene.add(fillLight);
+        
+        const rimLight = new THREE.DirectionalLight(0x5566ff, 0.8);
+        rimLight.position.set(-5, 3, -5);
+        scene.add(rimLight);
+        
+        const bottomLight = new THREE.DirectionalLight(0x334488, 0.4);
+        bottomLight.position.set(0, -5, 0);
+        scene.add(bottomLight);
+        
+        const pointLight1 = new THREE.PointLight(0xffaa33, 0.6, 8);
+        pointLight1.position.set(3, 3, 3);
+        scene.add(pointLight1);
+        
+        const pointLight2 = new THREE.PointLight(0x33aaff, 0.5, 8);
+        pointLight2.position.set(-3, 2, -3);
+        scene.add(pointLight2);
+        
+        const hemisphereLight = new THREE.HemisphereLight(0x4477ff, 0x222233, 0.5);
+        scene.add(hemisphereLight);
+        
+        // Cargador de texturas
+        const textureLoader = new THREE.TextureLoader();
+        
+        // Variables globales
+        let albumBox;
+        let autoRotate = true;
+        let rotationSpeed = 0.005;
+        let lastInteractionTime = 0;
+        
+        function loadTexture(url) {
+            return new Promise((resolve, reject) => {
+                textureLoader.load(url, resolve, undefined, reject);
+            });
+        }
+
+        Promise.all([
+            loadTexture(frontTextureURL),
+            loadTexture(backTextureURL),
+            loadTexture(sideTextureURL)
+        ]).then(([frontTexture, backTexture, sideTexture]) => {
+            document.getElementById('loading').style.display = 'none';
+            
+            frontTexture.wrapS = frontTexture.wrapT = THREE.ClampToEdgeWrapping;
+            backTexture.wrapS = backTexture.wrapT = THREE.ClampToEdgeWrapping;
+            sideTexture.wrapS = sideTexture.wrapT = THREE.ClampToEdgeWrapping;
+            [frontTexture, backTexture, sideTexture].forEach(texture => {
+                texture.encoding = THREE.sRGBEncoding;
+                texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
+            });
+            
+            albumBox = createAlbumBox(frontTexture, backTexture, sideTexture);
+            scene.add(albumBox);
+            
+            animate();
+        }).catch(error => {
+            console.error('Error loading textures:', error);
+            document.getElementById('loading').textContent = 'No se pudieron cargar las imágenes. Revisá la conexión e intentá nuevamente.';
+        });
+        
+        function createAlbumBox(frontTexture, backTexture, sideTexture) {
+            const group = new THREE.Group();
+            
+            const width = 2.8;
+            const height = 2.8;
+            const depth = 0.7;
+            
+            const materials = [
+                new THREE.MeshPhongMaterial({ 
+                    map: sideTexture,
+                    shininess: 60,
+                    specular: 0x222222
+                }),
+                new THREE.MeshPhongMaterial({ 
+                    map: sideTexture,
+                    shininess: 60,
+                    specular: 0x222222
+                }),
+                new THREE.MeshPhongMaterial({ 
+                    map: sideTexture,
+                    shininess: 60,
+                    specular: 0x222222
+                }),
+                new THREE.MeshPhongMaterial({ 
+                    map: sideTexture,
+                    shininess: 60,
+                    specular: 0x222222
+                }),
+                new THREE.MeshPhongMaterial({ 
+                    map: frontTexture,
+                    shininess: 80,
+                    specular: 0x333333
+                }), 
+                new THREE.MeshPhongMaterial({ 
+                    map: backTexture,
+                    shininess: 80,
+                    specular: 0x333333
+                })   
+            ];
+            
+            const boxGeometry = new THREE.BoxGeometry(width, height, depth);
+            const box = new THREE.Mesh(boxGeometry, materials);
+            box.castShadow = true;
+            box.receiveShadow = true;
+            
+            group.add(box);
+            return group;
+        }
+        
+        camera.position.set(0, 0, 6);
+        camera.lookAt(0, 0, 0);
+        
+        let resumeRotationTimeout;
+        const controlsInfo = document.getElementById('controlsInfo');
+
+        controls.addEventListener('start', () => {
+            autoRotate = false;
+            clearTimeout(resumeRotationTimeout);
+            controlsInfo.style.opacity = '0.95';
+        });
+
+        controls.addEventListener('end', () => {
+            clearTimeout(resumeRotationTimeout);
+            resumeRotationTimeout = setTimeout(() => {
+                autoRotate = true;
+                controlsInfo.style.opacity = '0.65';
+            }, 4500);
+        });
+
+        renderer.domElement.addEventListener('dblclick', () => {
+            clearTimeout(resumeRotationTimeout);
+            controls.reset();
+            camera.position.set(0, 0, 6);
+            camera.lookAt(0, 0, 0);
+            autoRotate = true;
+            controlsInfo.style.opacity = '0.85';
+        });
+        
+        function updateLights() {
+            const time = Date.now() * 0.001;
+            
+            pointLight1.intensity = 0.6 + Math.sin(time * 0.7) * 0.2;
+            pointLight2.intensity = 0.5 + Math.cos(time * 0.5) * 0.15;
+            
+            pointLight1.position.x = 3 + Math.sin(time * 0.3) * 0.5;
+            pointLight1.position.z = 3 + Math.cos(time * 0.3) * 0.5;
+            
+            pointLight2.position.x = -3 + Math.cos(time * 0.4) * 0.5;
+            pointLight2.position.z = -3 + Math.sin(time * 0.4) * 0.5;
+            
+            rimLight.intensity = 0.8 + Math.sin(time * 0.6) * 0.1;
+            coloredAmbient.color.setHSL(Math.sin(time * 0.1) * 0.1 + 0.6, 0.5, 0.5);
+            renderer.toneMappingExposure = 1.4 + Math.sin(time * 0.2) * 0.1;
+        }
+        
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = Math.min(clock.getDelta(), 0.05);
+            
+            if (autoRotate && albumBox) {
+                albumBox.rotation.y += rotationSpeed * (delta * 60);
+            }
+            
+            updateLights();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        function resizeRenderer() {
+            const width = Math.max(container.clientWidth, 1);
+            const height = Math.max(container.clientHeight, 1);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+        }
+
+        if ('ResizeObserver' in window) {
+            const resizeObserver = new ResizeObserver(resizeRenderer);
+            resizeObserver.observe(container);
+        } else {
+            window.addEventListener('resize', resizeRenderer, { passive: true });
+        }
+        
+        let hideControlsTimeout;
+        container.addEventListener('mouseenter', () => {
+            clearTimeout(hideControlsTimeout);
+            controlsInfo.style.opacity = '0.7';
+        });
+        
+        container.addEventListener('mouseleave', () => {
+            if (autoRotate) {
+                hideControlsTimeout = setTimeout(() => {
+                    controlsInfo.style.opacity = '0.3';
+                }, 2000);
+            }
+        });
+    </script>
+</body>
+</html>
